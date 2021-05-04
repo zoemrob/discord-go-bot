@@ -1,4 +1,4 @@
-module discord-bot
+module github.com/zoemrob/discord-go-bot
 
 go 1.16
 

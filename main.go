@@ -1,6 +1,6 @@
 package main
 
-import app "discord-bot/src"
+import "github.com/zoemrob/discord-go-bot/app"
 
 func main() {
 	app.Start()
