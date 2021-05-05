@@ -29,6 +29,11 @@ func Start() {
 		fmt.Println("Error connection to discord:", err)
 	}
 
+	rm := discord.AddHandler(messageCreate)
+	defer rm()
+
+	discord.Identify.Intents = discordgo.IntentsGuildMessages
+
 	// Wait here until CTRL-C or other term signal is received.
 	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	goCh := make(chan os.Signal, 1)
@@ -41,4 +46,26 @@ func closeSession(discord *discordgo.Session) {
 	if err != nil {
 		fmt.Println("Failed to close discord Session", err)
 	}
+}
+
+func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Ignore all messages created by the bot itself
+
+	if m.Author.ID == s.State.User.ID {
+		return
+	}
+
+	for _, u := range m.Mentions {
+		if u.ID == s.State.User.ID {
+			fmt.Println(m.ContentWithMentionsReplaced())
+
+			cmd := parseContent(m.Content, s.State.User.ID)
+
+			err := cmd.exec(s, m)
+			if err != nil {
+				fmt.Println(err)
+			}
+		}
+	}
+
 }
