@@ -1,1 +1,1 @@
-go run main.go -t "$DISCORDBOTKEY"
+go run cmd/main.go -t "$DISCORDBOTKEY"
