@@ -1,6 +1,7 @@
 package discordgobot
 
 import (
+	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"strings"
 )
@@ -50,4 +51,68 @@ func parseContent(content string, botID string) BotCommandDetails {
 			Command: BotCommandUnknown,
 		}
 	}
+}
+
+// DiscordContainer : Holds discordgo session and related info
+type DiscordContainer struct {
+	DiscordSession *discordgo.Session
+	eventHandlers []func()
+	Channels map[string]SimpleChannel
+}
+
+func NewDiscordContainer(botTokenEnv string) *DiscordContainer {
+	discord, err := discordgo.New("Bot " + botTokenEnv)
+	if err != nil {
+		fmt.Println("Error initializing discord:", err)
+	}
+
+	// initial capacity for 10 eventHandlers
+	return &DiscordContainer{
+		DiscordSession:           discord,
+		eventHandlers: make([]func(), 0, 10),
+		Channels: make(map[string]SimpleChannel),
+	}
+}
+
+func (d DiscordContainer) Init() {
+	err := d.DiscordSession.Open()
+	if err != nil {
+		fmt.Println("Error connection to discord:", err)
+	}
+
+	d.listenToIntents()
+}
+
+// AddHandler *discordgo.Session.AddHandler wrapper, adds cleanup methods
+// For use of always-on intent handlers
+func (d DiscordContainer) AddHandler(handler interface{}) {
+	rmHandler := d.DiscordSession.AddHandler(handler)
+	d.eventHandlers = append(d.eventHandlers, rmHandler)
+}
+
+// removeHandlers cleanup of added always-on handlers
+func (d DiscordContainer) removeHandlers() {
+	for _, rh := range d.eventHandlers {
+		rh()
+	}
+}
+
+// listenToIntents configures discordGo.Intents to listen for
+func (d DiscordContainer) listenToIntents() {
+	d.DiscordSession.Identify.Intents = discordgo.IntentsGuildMessages
+}
+
+// Close closes discordgo.Session and removes event handlers
+func (d DiscordContainer) Close() {
+	d.removeHandlers()
+	err := d.DiscordSession.Close()
+	if err != nil {
+		fmt.Println("Failed to close discord Session")
+	}
+}
+
+// SimpleChannel simplifies to only the data needed
+type SimpleChannel struct {
+	ID string
+	Name string
 }

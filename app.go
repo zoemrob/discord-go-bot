@@ -17,35 +17,55 @@ func init() {
 }
 
 func Start() {
-	discord, err := discordgo.New("Bot " + botTokenEnv)
-	if err != nil {
-		fmt.Println("Error initializing discord:", err)
+	discord := NewDiscordContainer(botTokenEnv)
+	onReady := func (s *discordgo.Session, r *discordgo.Ready) {
+		for _, guild := range r.Guilds {
+			channels, err := s.GuildChannels(guild.ID)
+			if err != nil {
+				fmt.Println("failed to get guild channels", err)
+			}
+
+			for _, channel := range channels {
+				discord.Channels[channel.Name] = SimpleChannel{
+					ID: channel.ID,
+					Name: channel.Name,
+				}
+			}
+		}
+
+		if sonaChan, ok := discord.Channels["sona-dev"]; ok {
+			_, err := s.ChannelMessageSend(sonaChan.ID, "Hi! I'm finally here! Talk to me with @go-bot commands")
+			if err != nil {
+				fmt.Println("Failed to greet", err)
+			}
+		}
+
+		fmt.Println("discord struct", discord.Channels)
 	}
+	// add handlers
+	discord.AddHandler(onReady)
+	discord.AddHandler(messageCreate)
+	discord.Init()
+	defer discord.Close()
 
-	defer closeSession(discord)
 
-	err = discord.Open()
-	if err != nil {
-		fmt.Println("Error connection to discord:", err)
-	}
-
-	rm := discord.AddHandler(messageCreate)
-	defer rm()
-
-	discord.Identify.Intents = discordgo.IntentsGuildMessages
+	// TODO: create a channel / goroutine / select to receive messages
+	// from os.STDIN
+	//reader := bufio.NewReader(os.Stdin)
+	//for {
+	//	fmt.Print("-> ")
+	//	text, _ := reader.ReadString('\n')
+	//
+	//	text = strings.Replace(text, "\n", "", -1)
+	//
+	//	fmt.Println()
+	//}
 
 	// Wait here until CTRL-C or other term signal is received.
 	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	goCh := make(chan os.Signal, 1)
 	signal.Notify(goCh, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-goCh
-}
-
-func closeSession(discord *discordgo.Session) {
-	err := discord.Close()
-	if err != nil {
-		fmt.Println("Failed to close discord Session", err)
-	}
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -67,5 +87,4 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 		}
 	}
-
 }
