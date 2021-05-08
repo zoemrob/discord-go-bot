@@ -18,7 +18,7 @@ func init() {
 
 func Start() {
 	discord := NewDiscordContainer(botTokenEnv)
-	onReady := func (s *discordgo.Session, r *discordgo.Ready) {
+	onReady := func(s *discordgo.Session, r *discordgo.Ready) {
 		for _, guild := range r.Guilds {
 			channels, err := s.GuildChannels(guild.ID)
 			if err != nil {
@@ -27,13 +27,13 @@ func Start() {
 
 			for _, channel := range channels {
 				discord.Channels[channel.Name] = SimpleChannel{
-					ID: channel.ID,
+					ID:   channel.ID,
 					Name: channel.Name,
 				}
 			}
 		}
-
-		discord.SendToSonaDevChannel("Hi! I'm finally here! Talk to me with @go-bot commands")
+		// disable for testing
+		//discord.SendToSonaDevChannel("Hi! I'm finally here! Talk to me with @go-bot commands")
 	}
 	// add handlers
 	discord.AddHandler(onReady)
@@ -47,7 +47,7 @@ func Start() {
 	fmt.Println("Bot is now running.  Type `exit` to quit, and type anything else to speak through me!")
 	for {
 		fmt.Print("-> ")
-		text, ok := <- stdinCh
+		text, ok := <-stdinCh
 		if !ok {
 			break
 		}
@@ -55,7 +55,7 @@ func Start() {
 	}
 }
 
-func readStdin (stdinCh chan string) {
+func readStdin(stdinCh chan string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		text, _ := reader.ReadString('\n')
@@ -80,9 +80,9 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if u.ID == s.State.User.ID {
 			fmt.Println(m.ContentWithMentionsReplaced())
 
-			cmd := parseContent(m.Content, s.State.User.ID)
+			cmd := parseContent(s, m)
 
-			err := cmd.exec(s, m)
+			err := cmd.exec()
 			if err != nil {
 				fmt.Println(err)
 			}

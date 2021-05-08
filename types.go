@@ -1,8 +1,11 @@
 package discordgobot
 
 import (
+	"errors"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
+	//"github.com/PuerkitoBio/goquery"
+	"net/url"
 	"strings"
 )
 
@@ -12,45 +15,119 @@ const (
 	BotCommandHelp BotCommand = 1 << iota
 	BotCommandMention
 	BotCommandUnknown
+	BotCommandMdnSearch
 )
 
 const (
-	BotHelp string = "help"
+	BotHelp      string = "help"
+	BotMdnSearch        = "mdn"
+)
+
+const (
 	sonaDevDiscordChannel string = "sona-dev"
 )
 
-
-type BotCommandDetails struct {
-	Command BotCommand
+type BotCommandInterface interface {
+	exec() error
 }
 
-func (bc *BotCommandDetails) exec(s *discordgo.Session, m *discordgo.MessageCreate) error {
+type BasicBotCommand struct {
+	Command       BotCommand
+	Session       *discordgo.Session
+	MessageCreate *discordgo.MessageCreate
+}
+
+type BotCommandGeneric struct {
+	BasicBotCommand
+}
+
+type BotCommandSearch struct {
+	BasicBotCommand
+	SearchTerms string
+}
+
+func (bcs BotCommandSearch) exec() error {
+	if u, ok := bcs.generateURL(bcs.SearchTerms); ok {
+		fmt.Println(u)
+		return nil
+	}
+	return errors.New(fmt.Sprintf("There was a problem with %T.exec", bcs))
+}
+
+// TODO
+func (bcs BotCommandSearch) searchURL(url string) string {
+	return ""
+}
+
+func (bcs BotCommandSearch) generateURL(search string) (string, bool) {
+	switch bcs.Command {
+	case BotCommandMdnSearch:
+		u := url.URL{
+			Scheme: "https",
+			Host:   "developer.mozilla.org",
+			Path:   "/en-US/search",
+		}
+
+		q := u.Query()
+		q.Add("q", search)
+		u.RawQuery = q.Encode()
+		return u.String(), true
+	default:
+		return "", false
+	}
+}
+
+func getBotCommand(bc BotCommandInterface) *BotCommandInterface {
+	switch bc.(type) {
+	case BotCommandGeneric:
+	case BotCommandSearch:
+	}
+
+	return &bc
+}
+
+func (bc BotCommandGeneric) exec() error {
 	var err error
 	switch bc.Command {
 	case BotCommandHelp:
-		_, err = s.ChannelMessageSend(m.ChannelID, "This is just testing a general response for help.")
+		_, err = bc.Session.ChannelMessageSend(bc.MessageCreate.ChannelID, "This is just testing a general response for help.")
 	case BotCommandMention:
-		_, err = s.ChannelMessageSend(m.ChannelID, "You called sire?\n`Mention me with a command`")
+		_, err = bc.Session.ChannelMessageSend(bc.MessageCreate.ChannelID, "You called sire?\n`Mention me with a command`")
 	case BotCommandUnknown:
-		_, err = s.ChannelMessageSend(m.ChannelID, "Um... I didn't get that. Try something different...?")
+		_, err = bc.Session.ChannelMessageSend(bc.MessageCreate.ChannelID, "Um... I didn't get that. Try something different...?")
 	}
 
 	return err
 }
 
-func parseContent(content string, botID string) BotCommandDetails {
+func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandInterface {
+	botID := s.State.User.ID
+	botMention := fmt.Sprintf("<@!%v>", botID)
+	content := m.Content
+
+	trimmedContent := content[strings.Index(content, botMention)+len(botMention):]
+
 	switch {
-	case strings.Contains(content, BotHelp):
-		return BotCommandDetails{
-			Command: BotCommandHelp,
+	// @bot
+	case strings.Trim(trimmedContent, " \n") == "":
+		return &BotCommandGeneric{
+			BasicBotCommand{BotCommandMention, s, m},
 		}
-	case strings.Trim(content, "<@!> ") == botID:
-		return BotCommandDetails{
-			Command: BotCommandMention,
+	// @bot help
+	case strings.Contains(trimmedContent, BotHelp):
+		return &BotCommandGeneric{
+			BasicBotCommand{BotCommandHelp, s, m},
 		}
+	// @bot mdn <search terms>
+	case strings.Contains(trimmedContent, BotMdnSearch):
+		return &BotCommandSearch{
+			BasicBotCommand: BasicBotCommand{BotCommandMdnSearch, s, m},
+			SearchTerms:     strings.Trim(trimmedContent[strings.Index(trimmedContent, BotMdnSearch)+len(BotMdnSearch):], " \n"),
+		}
+	// command is not found
 	default:
-		return BotCommandDetails{
-			Command: BotCommandUnknown,
+		return &BotCommandGeneric{
+			BasicBotCommand{BotCommandUnknown, s, m},
 		}
 	}
 }
@@ -58,8 +135,8 @@ func parseContent(content string, botID string) BotCommandDetails {
 // DiscordContainer : Holds discordgo session and related info
 type DiscordContainer struct {
 	DiscordSession *discordgo.Session
-	eventHandlers []func()
-	Channels map[string]SimpleChannel
+	eventHandlers  []func()
+	Channels       map[string]SimpleChannel
 }
 
 func NewDiscordContainer(botTokenEnv string) *DiscordContainer {
@@ -70,9 +147,9 @@ func NewDiscordContainer(botTokenEnv string) *DiscordContainer {
 
 	// initial capacity for 10 eventHandlers
 	return &DiscordContainer{
-		DiscordSession:           discord,
-		eventHandlers: make([]func(), 0, 10),
-		Channels: make(map[string]SimpleChannel),
+		DiscordSession: discord,
+		eventHandlers:  make([]func(), 0, 10),
+		Channels:       make(map[string]SimpleChannel),
 	}
 }
 
@@ -125,6 +202,6 @@ func (d DiscordContainer) SendToSonaDevChannel(message string) {
 
 // SimpleChannel simplifies to only the data needed
 type SimpleChannel struct {
-	ID string
+	ID   string
 	Name string
 }
