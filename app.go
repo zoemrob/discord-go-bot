@@ -1,12 +1,12 @@
 package discordgobot
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"os"
-	"os/signal"
-	"syscall"
+	"strings"
 )
 
 var botTokenEnv string
@@ -33,14 +33,7 @@ func Start() {
 			}
 		}
 
-		if sonaChan, ok := discord.Channels["sona-dev"]; ok {
-			_, err := s.ChannelMessageSend(sonaChan.ID, "Hi! I'm finally here! Talk to me with @go-bot commands")
-			if err != nil {
-				fmt.Println("Failed to greet", err)
-			}
-		}
-
-		fmt.Println("discord struct", discord.Channels)
+		discord.SendToSonaDevChannel("Hi! I'm finally here! Talk to me with @go-bot commands")
 	}
 	// add handlers
 	discord.AddHandler(onReady)
@@ -48,29 +41,37 @@ func Start() {
 	discord.Init()
 	defer discord.Close()
 
+	stdinCh := make(chan string)
+	go readStdin(stdinCh)
 
-	// TODO: create a channel / goroutine / select to receive messages
-	// from os.STDIN
-	//reader := bufio.NewReader(os.Stdin)
-	//for {
-	//	fmt.Print("-> ")
-	//	text, _ := reader.ReadString('\n')
-	//
-	//	text = strings.Replace(text, "\n", "", -1)
-	//
-	//	fmt.Println()
-	//}
+	fmt.Println("Bot is now running.  Type `exit` to quit, and type anything else to speak through me!")
+	for {
+		fmt.Print("-> ")
+		text, ok := <- stdinCh
+		if !ok {
+			break
+		}
+		discord.SendToSonaDevChannel(text)
+	}
+}
 
-	// Wait here until CTRL-C or other term signal is received.
-	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
-	goCh := make(chan os.Signal, 1)
-	signal.Notify(goCh, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-	<-goCh
+func readStdin (stdinCh chan string) {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		text, _ := reader.ReadString('\n')
+		text = strings.Replace(text, "\n", "", -1)
+
+		if text == "exit" {
+			close(stdinCh)
+			return
+		}
+
+		stdinCh <- text
+	}
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	// Ignore all messages created by the bot itself
-
 	if m.Author.ID == s.State.User.ID {
 		return
 	}

@@ -16,7 +16,9 @@ const (
 
 const (
 	BotHelp string = "help"
+	sonaDevDiscordChannel string = "sona-dev"
 )
+
 
 type BotCommandDetails struct {
 	Command BotCommand
@@ -108,6 +110,16 @@ func (d DiscordContainer) Close() {
 	err := d.DiscordSession.Close()
 	if err != nil {
 		fmt.Println("Failed to close discord Session")
+	}
+}
+
+// SendToSonaDevChannel allows sending to main dev channel
+func (d DiscordContainer) SendToSonaDevChannel(message string) {
+	if sonaChan, ok := d.Channels[sonaDevDiscordChannel]; ok {
+		_, err := d.DiscordSession.ChannelMessageSend(sonaChan.ID, message)
+		if err != nil {
+			fmt.Println("Failed to send message:", message, "Error:", err)
+		}
 	}
 }
 
