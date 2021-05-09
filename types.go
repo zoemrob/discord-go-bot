@@ -3,8 +3,10 @@ package discordgobot
 import (
 	"errors"
 	"fmt"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/bwmarrin/discordgo"
-	//"github.com/PuerkitoBio/goquery"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -49,17 +51,14 @@ type BotCommandSearch struct {
 func (bcs BotCommandSearch) exec() error {
 	if u, ok := bcs.generateURL(bcs.SearchTerms); ok {
 		fmt.Println(u)
+		fmt.Println(bcs.getNResults(u, 3))
+		//err := bcs.respondToChannel(u.String())
 		return nil
 	}
 	return errors.New(fmt.Sprintf("There was a problem with %T.exec", bcs))
 }
 
-// TODO
-func (bcs BotCommandSearch) searchURL(url string) string {
-	return ""
-}
-
-func (bcs BotCommandSearch) generateURL(search string) (string, bool) {
+func (bcs BotCommandSearch) generateURL(search string) (url.URL, bool) {
 	switch bcs.Command {
 	case BotCommandMdnSearch:
 		u := url.URL{
@@ -71,9 +70,50 @@ func (bcs BotCommandSearch) generateURL(search string) (string, bool) {
 		q := u.Query()
 		q.Add("q", search)
 		u.RawQuery = q.Encode()
-		return u.String(), true
+		return u, true
 	default:
-		return "", false
+		return url.URL{}, false
+	}
+}
+
+func (bcs BotCommandSearch) getNResults(u url.URL, n int) string {
+	res, err := http.Get(u.String())
+	if err != nil {
+		fmt.Printf("Error in %T.getNResults\nParams:%v\nError:%v", bcs, u, err)
+	}
+
+	defer closeReader(res.Body)
+
+	if res.StatusCode != 200 {
+		fmt.Printf("status code error: %d %s", res.StatusCode, res.Status)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	//results := make([]string, 0, n)
+	switch bcs.Command {
+	case BotCommandMdnSearch:
+		// FIXME: somethin not workin
+		doc.Find(".search-result-url > a").Each(func(i int, s *goquery.Selection) {
+			fmt.Println("Got into loop")
+			for _, node := range s.Nodes {
+				fmt.Println(node)
+
+			}
+		})
+
+	}
+
+	return ""
+}
+
+func closeReader(Body io.ReadCloser) {
+	err := Body.Close()
+	if err != nil {
+		fmt.Printf("Error closing %T\nError:%v", Body, err)
 	}
 }
 
@@ -86,15 +126,20 @@ func getBotCommand(bc BotCommandInterface) *BotCommandInterface {
 	return &bc
 }
 
-func (bc BotCommandGeneric) exec() error {
+func (bbc BasicBotCommand) respondToChannel(message string) error {
+	_, err := bbc.Session.ChannelMessageSend(bbc.MessageCreate.ChannelID, message)
+	return err
+}
+
+func (bcg BotCommandGeneric) exec() error {
 	var err error
-	switch bc.Command {
+	switch bcg.Command {
 	case BotCommandHelp:
-		_, err = bc.Session.ChannelMessageSend(bc.MessageCreate.ChannelID, "This is just testing a general response for help.")
+		_, err = bcg.Session.ChannelMessageSend(bcg.MessageCreate.ChannelID, "This is just testing a general response for help.")
 	case BotCommandMention:
-		_, err = bc.Session.ChannelMessageSend(bc.MessageCreate.ChannelID, "You called sire?\n`Mention me with a command`")
+		_, err = bcg.Session.ChannelMessageSend(bcg.MessageCreate.ChannelID, "You called sire?\n`Mention me with a command`")
 	case BotCommandUnknown:
-		_, err = bc.Session.ChannelMessageSend(bc.MessageCreate.ChannelID, "Um... I didn't get that. Try something different...?")
+		_, err = bcg.Session.ChannelMessageSend(bcg.MessageCreate.ChannelID, "Um... I didn't get that. Try something different...?")
 	}
 
 	return err
