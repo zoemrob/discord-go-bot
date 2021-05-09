@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 var botTokenEnv string
+var disablePassthrough bool
 
 func init() {
 	flag.StringVar(&botTokenEnv, "t", "", "Bot Token")
+	flag.BoolVar(&disablePassthrough, "d", false, "Disable passthrough")
 	flag.Parse()
 }
 
@@ -44,14 +48,22 @@ func Start() {
 	stdinCh := make(chan string)
 	go readStdin(stdinCh)
 
-	fmt.Println("Bot is now running.  Type `exit` to quit, and type anything else to speak through me!")
-	for {
-		fmt.Print("-> ")
-		text, ok := <-stdinCh
-		if !ok {
-			break
+	if !disablePassthrough {
+		fmt.Println("Bot is now running.  Type `exit` to quit, and type anything else to speak through me!")
+		for {
+			fmt.Print("-> ")
+			text, ok := <-stdinCh
+			if !ok {
+				break
+			}
+			discord.SendToSonaDevChannel(text)
 		}
-		discord.SendToSonaDevChannel(text)
+	} else {
+		// Wait here until CTRL-C or other term signal is received.
+		fmt.Println("Bot is now running.  Press CTRL-C to exit.")
+		goCh := make(chan os.Signal, 1)
+		signal.Notify(goCh, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+		<-goCh
 	}
 }
 
