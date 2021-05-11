@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
+	"regexp"
 )
 
 type BotCommand int
@@ -50,10 +50,8 @@ type BotCommandSearch struct {
 
 func (bcs BotCommandSearch) exec() error {
 	if u, ok := bcs.generateURL(bcs.SearchTerms); ok {
-		fmt.Println(u)
-		fmt.Println(bcs.getNResults(u, 3))
-		//err := bcs.respondToChannel(u.String())
-		return nil
+		err := bcs.respondToChannel(u.String())
+		return err
 	}
 	return errors.New(fmt.Sprintf("There was a problem with %T.exec", bcs))
 }
@@ -76,6 +74,7 @@ func (bcs BotCommandSearch) generateURL(search string) (url.URL, bool) {
 	}
 }
 
+// BotCommandSearch UNUSED currently
 func (bcs BotCommandSearch) getNResults(u url.URL, n int) string {
 	res, err := http.Get(u.String())
 	if err != nil {
@@ -117,15 +116,6 @@ func closeReader(Body io.ReadCloser) {
 	}
 }
 
-func getBotCommand(bc BotCommandInterface) *BotCommandInterface {
-	switch bc.(type) {
-	case BotCommandGeneric:
-	case BotCommandSearch:
-	}
-
-	return &bc
-}
-
 func (bbc BasicBotCommand) respondToChannel(message string) error {
 	_, err := bbc.Session.ChannelMessageSend(bbc.MessageCreate.ChannelID, message)
 	return err
@@ -150,24 +140,28 @@ func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandIn
 	botMention := fmt.Sprintf("<@!%v>", botID)
 	content := m.Content
 
-	trimmedContent := content[strings.Index(content, botMention)+len(botMention):]
+	regexPrefix := botMention + `\s*`
+
+	botMentionRegex := regexp.MustCompile(regexPrefix + `$`)
+	botHelpRegex := regexp.MustCompile(regexPrefix + BotHelp)
+	botMdnSearchRegex := regexp.MustCompile(regexPrefix + BotMdnSearch)
 
 	switch {
 	// @bot
-	case strings.Trim(trimmedContent, " \n") == "":
+	case botMentionRegex.MatchString(content):
 		return &BotCommandGeneric{
 			BasicBotCommand{BotCommandMention, s, m},
 		}
 	// @bot help
-	case strings.Contains(trimmedContent, BotHelp):
+	case botHelpRegex.MatchString(content):
 		return &BotCommandGeneric{
 			BasicBotCommand{BotCommandHelp, s, m},
 		}
 	// @bot mdn <search terms>
-	case strings.Contains(trimmedContent, BotMdnSearch):
+	case botMdnSearchRegex.MatchString(content):
 		return &BotCommandSearch{
 			BasicBotCommand: BasicBotCommand{BotCommandMdnSearch, s, m},
-			SearchTerms:     strings.Trim(trimmedContent[strings.Index(trimmedContent, BotMdnSearch)+len(BotMdnSearch):], " \n"),
+			SearchTerms:     botMdnSearchRegex.ReplaceAllString(content, ""),
 		}
 	// command is not found
 	default:
@@ -243,6 +237,11 @@ func (d DiscordContainer) SendToSonaDevChannel(message string) {
 			fmt.Println("Failed to send message:", message, "Error:", err)
 		}
 	}
+}
+
+// GetBotName returns the server bot name
+func (d DiscordContainer) GetBotName() string {
+	return "@" + d.DiscordSession.State.User.Username
 }
 
 // SimpleChannel simplifies to only the data needed
