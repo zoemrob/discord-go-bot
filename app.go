@@ -98,6 +98,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			if err != nil {
 				fmt.Println(err)
 			}
+			return
 		}
 	}
+
+	// TODO: add some funny responses to random things people say
+	// example, 1/3rd chance that if someone sends a message only containing an emoji
+	// respond with "don't you :emoji: me"
 }

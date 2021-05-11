@@ -276,6 +276,7 @@ func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandIn
 			BasicBotCommand: BasicBotCommand{BotCommandGithubSearch, s, m},
 			SearchTerms:     botGithubSearchRegex.ReplaceAllString(content, ""),
 		}
+	// TODO: // BotCommandShadowUser, which accepts another user mention, and then go-bot mimics them in an annoying way
 	// command is not found
 	default:
 		return &BotCommandGeneric{
