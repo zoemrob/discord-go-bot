@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 )
 
 type BotCommand int
@@ -18,11 +19,13 @@ const (
 	BotCommandMention
 	BotCommandUnknown
 	BotCommandMdnSearch
+	BotCommandGoPkgSearch
 )
 
 const (
-	BotHelp      string = "help"
-	BotMdnSearch        = "mdn"
+	BotHelp        string = "help"
+	BotMdnSearch          = "mdn"
+	BotGoPkgSearch        = "go"
 )
 
 const (
@@ -50,7 +53,12 @@ type BotCommandSearch struct {
 
 func (bcs BotCommandSearch) exec() error {
 	if u, ok := bcs.generateURL(bcs.SearchTerms); ok {
-		err := bcs.respondToChannel(u.String())
+		response, ok := bcs.getNResults(u, 3)
+		if !ok {
+			response = u.String()
+		}
+
+		err := bcs.respondToChannel(response)
 		return err
 	}
 	return errors.New(fmt.Sprintf("There was a problem with %T.exec", bcs))
@@ -59,23 +67,29 @@ func (bcs BotCommandSearch) exec() error {
 func (bcs BotCommandSearch) generateURL(search string) (url.URL, bool) {
 	switch bcs.Command {
 	case BotCommandMdnSearch:
-		u := url.URL{
-			Scheme: "https",
-			Host:   "developer.mozilla.org",
-			Path:   "/en-US/search",
-		}
-
-		q := u.Query()
-		q.Add("q", search)
-		u.RawQuery = q.Encode()
-		return u, true
+		return buildUrlWithQuery(
+			"developer.mozilla.org",
+			"/en-US/search",
+			"q",
+			search,
+		), true
+	case BotCommandGoPkgSearch:
+		return buildUrlWithQuery(
+			"pkg.go.dev",
+			"search",
+			"q",
+			search,
+		), true
 	default:
 		return url.URL{}, false
 	}
 }
 
-// BotCommandSearch UNUSED currently
-func (bcs BotCommandSearch) getNResults(u url.URL, n int) string {
+// BotCommandSearch takes a url to query and a number of results to return
+func (bcs BotCommandSearch) getNResults(u url.URL, n int) (string, bool) {
+	if bcs.Command == BotCommandMdnSearch {
+		return "", false
+	}
 	res, err := http.Get(u.String())
 	if err != nil {
 		fmt.Printf("Error in %T.getNResults\nParams:%v\nError:%v", bcs, u, err)
@@ -92,21 +106,29 @@ func (bcs BotCommandSearch) getNResults(u url.URL, n int) string {
 		fmt.Println(err)
 	}
 
-	//results := make([]string, 0, n)
+	results := make([]string, 0, n+1)
 	switch bcs.Command {
-	case BotCommandMdnSearch:
-		// FIXME: somethin not workin
-		doc.Find(".search-result-url > a").Each(func(i int, s *goquery.Selection) {
-			fmt.Println("Got into loop")
-			for _, node := range s.Nodes {
-				fmt.Println(node)
+	case BotCommandGoPkgSearch:
+		results = append(results, "Here's what I found at pkg.go.dev...")
+		doc.Find(".SearchResults .LegacySearchSnippet").Each(func(i int, s *goquery.Selection) {
+			if i > 2 {
+				return
+			}
 
+			var rs string
+			if link, exists := s.Find("a").First().Attr("href"); exists {
+				rs += formatUrlForMessage(u, link)
+				rs += s.Find("p.SearchSnippet-synopsis").First().Text()
+			}
+
+			if rs != "" {
+				results = append(results, rs)
 			}
 		})
 
 	}
 
-	return ""
+	return strings.Join(results, "\n\n"), true
 }
 
 func closeReader(Body io.ReadCloser) {
@@ -145,6 +167,7 @@ func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandIn
 	botMentionRegex := regexp.MustCompile(regexPrefix + `$`)
 	botHelpRegex := regexp.MustCompile(regexPrefix + BotHelp)
 	botMdnSearchRegex := regexp.MustCompile(regexPrefix + BotMdnSearch)
+	botGoPkgSearchRegex := regexp.MustCompile(regexPrefix + BotGoPkgSearch)
 
 	switch {
 	// @bot
@@ -162,6 +185,12 @@ func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandIn
 		return &BotCommandSearch{
 			BasicBotCommand: BasicBotCommand{BotCommandMdnSearch, s, m},
 			SearchTerms:     botMdnSearchRegex.ReplaceAllString(content, ""),
+		}
+	// @bot go <search terms>
+	case botGoPkgSearchRegex.MatchString(content):
+		return &BotCommandSearch{
+			BasicBotCommand: BasicBotCommand{BotCommandGoPkgSearch, s, m},
+			SearchTerms:     botGoPkgSearchRegex.ReplaceAllString(content, ""),
 		}
 	// command is not found
 	default:
@@ -248,4 +277,24 @@ func (d DiscordContainer) GetBotName() string {
 type SimpleChannel struct {
 	ID   string
 	Name string
+}
+
+// formatUrlForMessage returns a properly formatted string for sending to client
+func formatUrlForMessage(u url.URL, path string) string {
+	return u.Scheme + "://" + u.Host + path + "\n\t"
+}
+
+// buildUrl shortens the repetition of adding query params
+func buildUrlWithQuery(host, path, qparam, search string) url.URL {
+	u := url.URL{
+		Scheme: "https",
+		Host:   host,
+		Path:   path,
+	}
+
+	q := u.Query()
+	q.Add(qparam, search)
+	u.RawQuery = q.Encode()
+
+	return u
 }
