@@ -6,6 +6,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bwmarrin/discordgo"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -18,19 +19,39 @@ const (
 	BotCommandHelp BotCommand = 1 << iota
 	BotCommandMention
 	BotCommandUnknown
+	BotCommandInsult
 	BotCommandMdnSearch
 	BotCommandGoPkgSearch
+	BotCommandGithubSearch
 )
 
 const (
-	BotHelp        string = "help"
-	BotMdnSearch          = "mdn"
-	BotGoPkgSearch        = "go"
+	BotHelp         string = "help"
+	BotInsult              = "insult me"
+	BotMdnSearch           = "mdn"
+	BotGoPkgSearch         = "go"
+	BotGithubSearch        = "gh"
 )
 
-const (
-	sonaDevDiscordChannel string = "sona-dev"
-)
+const sonaDevDiscordChannel string = "sona-dev"
+
+const BotHelpMessage = `Commands:
+		` + "`help`" + `
+				Returns this dialogue, a list of commands.
+
+		` + "`mdn <search terms>`" + `
+				Searches Mozilla Developer Network and returns link to results
+
+		` + "`go <search terms>`" + `
+				Searches Go Pkg for relevant Go packages and returns the first 3 results
+
+		` + "`gh <search terms>`" + `
+				Searches Github for relevant git repositories and returns the first 3 results
+
+		` + "`insult me`" + `
+				If you are feeling too proud
+
+`
 
 type BotCommandInterface interface {
 	exec() error
@@ -80,6 +101,13 @@ func (bcs BotCommandSearch) generateURL(search string) (url.URL, bool) {
 			"q",
 			search,
 		), true
+	case BotCommandGithubSearch:
+		return buildUrlWithQuery(
+			"github.com",
+			"search",
+			"q",
+			search,
+		), true
 	default:
 		return url.URL{}, false
 	}
@@ -125,7 +153,31 @@ func (bcs BotCommandSearch) getNResults(u url.URL, n int) (string, bool) {
 				results = append(results, rs)
 			}
 		})
+	case BotCommandGithubSearch:
+		results = append(results, "Here's what I found at the ol' Github...")
+		doc.Find(".repo-list-item").Each(func(i int, s *goquery.Selection) {
+			if i > 2 {
+				return
+			}
 
+			var rs string
+			if link, exists := s.Find("a").First().Attr("href"); exists {
+				rs += formatUrlForMessage(u, link)
+				raw := s.Find("p").First().Text()
+				trimmed := strings.Replace(raw, "<em>", "", -1)
+				trimmed = strings.Replace(trimmed, "</em>", "", -1)
+				trimmed = strings.Replace(trimmed, "\n", "", -1)
+				rs += trimmed
+			}
+
+			if rs != "" {
+				results = append(results, rs)
+			}
+		})
+	}
+
+	if len(results) == 0 {
+		results = append(results, "Seems like there wasn't anything to find. Sorry.")
 	}
 
 	return strings.Join(results, "\n\n"), true
@@ -147,14 +199,33 @@ func (bcg BotCommandGeneric) exec() error {
 	var err error
 	switch bcg.Command {
 	case BotCommandHelp:
-		_, err = bcg.Session.ChannelMessageSend(bcg.MessageCreate.ChannelID, "This is just testing a general response for help.")
+		err = bcg.respondToChannel(BotHelpMessage)
 	case BotCommandMention:
-		_, err = bcg.Session.ChannelMessageSend(bcg.MessageCreate.ChannelID, "You called sire?\n`Mention me with a command`")
+		err = bcg.respondToChannel("You called sire? Mention me with " + GetBotName(bcg.Session))
+	case BotCommandInsult:
+		err = bcg.respondToChannel(getRandomInsult())
 	case BotCommandUnknown:
-		_, err = bcg.Session.ChannelMessageSend(bcg.MessageCreate.ChannelID, "Um... I didn't get that. Try something different...?")
+		err = bcg.respondToChannel("Um... I didn't get that. Try `" + GetBotName(bcg.Session) + " help`")
 	}
 
 	return err
+}
+
+func getRandomInsult() string {
+	insults := []string{
+		"You are basically a dog with a human body",
+		"I wish you were just less of a turd",
+		"Yeah, I mean, uh... you kinda suck",
+		"Your mother was a hamster, and your father smelt of elderberries",
+		"Sorry, I don't feel like it",
+		"Um. No?",
+		"You look like you got yeeted in the face by a lobster",
+		"I didn't even know you were smart enough to speak!",
+		"*sigh...* Why are you such a glutton for punishment?",
+		"When you die in Warzone, your squad buys self-revive instead",
+	}
+
+	return insults[rand.Intn(len(insults)-1)]
 }
 
 func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandInterface {
@@ -165,9 +236,11 @@ func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandIn
 	regexPrefix := botMention + `\s*`
 
 	botMentionRegex := regexp.MustCompile(regexPrefix + `$`)
-	botHelpRegex := regexp.MustCompile(regexPrefix + BotHelp)
-	botMdnSearchRegex := regexp.MustCompile(regexPrefix + BotMdnSearch)
-	botGoPkgSearchRegex := regexp.MustCompile(regexPrefix + BotGoPkgSearch)
+	botHelpRegex := regexp.MustCompile(regexPrefix + BotHelp + `\s*`)
+	botInsultRegex := regexp.MustCompile(regexPrefix + BotInsult + `\s*`)
+	botMdnSearchRegex := regexp.MustCompile(regexPrefix + BotMdnSearch + `\s*`)
+	botGoPkgSearchRegex := regexp.MustCompile(regexPrefix + BotGoPkgSearch + `\s*`)
+	botGithubSearchRegex := regexp.MustCompile(regexPrefix + BotGithubSearch + `\s*`)
 
 	switch {
 	// @bot
@@ -180,6 +253,11 @@ func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandIn
 		return &BotCommandGeneric{
 			BasicBotCommand{BotCommandHelp, s, m},
 		}
+	// @bot insult me
+	case botInsultRegex.MatchString(content):
+		return &BotCommandGeneric{
+			BasicBotCommand{BotCommandInsult, s, m},
+		}
 	// @bot mdn <search terms>
 	case botMdnSearchRegex.MatchString(content):
 		return &BotCommandSearch{
@@ -191,6 +269,12 @@ func parseContent(s *discordgo.Session, m *discordgo.MessageCreate) BotCommandIn
 		return &BotCommandSearch{
 			BasicBotCommand: BasicBotCommand{BotCommandGoPkgSearch, s, m},
 			SearchTerms:     botGoPkgSearchRegex.ReplaceAllString(content, ""),
+		}
+	// @bot gh <search terms>
+	case botGithubSearchRegex.MatchString(content):
+		return &BotCommandSearch{
+			BasicBotCommand: BasicBotCommand{BotCommandGithubSearch, s, m},
+			SearchTerms:     botGithubSearchRegex.ReplaceAllString(content, ""),
 		}
 	// command is not found
 	default:
@@ -269,8 +353,8 @@ func (d DiscordContainer) SendToSonaDevChannel(message string) {
 }
 
 // GetBotName returns the server bot name
-func (d DiscordContainer) GetBotName() string {
-	return "@" + d.DiscordSession.State.User.Username
+func GetBotName(s *discordgo.Session) string {
+	return "@" + s.State.User.Username
 }
 
 // SimpleChannel simplifies to only the data needed

@@ -37,7 +37,7 @@ func Start() {
 			}
 		}
 		// disable for testing
-		//discord.SendToSonaDevChannel("Hi! I'm finally here! Talk to me with @go-bot commands")
+		discord.SendToSonaDevChannel("Hi! I'm finally here! Talk to me with " + GetBotName(discord.DiscordSession) + " commands")
 	}
 	// add handlers
 	discord.AddHandler(onReady)
