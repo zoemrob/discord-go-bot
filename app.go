@@ -46,39 +46,51 @@ func Start() {
 	defer discord.Close()
 
 	stdinCh := make(chan string)
-	go readStdin(stdinCh)
+	sigCh := make(chan os.Signal, 1)
+	// uniquely non blocking, signal.Notify does not block even unbuffered
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	go readStdin(stdinCh, sigCh)
 
-	if !disablePassthrough {
-		fmt.Println("Bot is now running.  Type `exit` to quit, and type anything else to speak through me!")
-		for {
-			fmt.Print("-> ")
-			text, ok := <-stdinCh
-			if !ok {
-				break
-			}
+	fmt.Println("Bot is now running.  Type `exit` or `^C` to quit, and type anything else to speak through me!")
+	fmt.Print("-> ")
+	for text := range stdinCh {
+		if !disablePassthrough {
 			discord.SendToSonaDevChannel(text)
 		}
-	} else {
-		// Wait here until CTRL-C or other term signal is received.
-		fmt.Println("Bot is now running.  Press CTRL-C to exit.")
-		goCh := make(chan os.Signal, 1)
-		signal.Notify(goCh, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-		<-goCh
+		fmt.Print("-> ")
 	}
+	fmt.Println("closing...")
 }
 
-func readStdin(stdinCh chan string) {
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		text, _ := reader.ReadString('\n')
-		text = strings.Replace(text, "\n", "", -1)
-
-		if text == "exit" {
-			close(stdinCh)
-			return
+func readStdin(stdinCh chan<- string, sigCh <-chan os.Signal) {
+	// include buffer of one to handle ^C os signal
+	rCh := make(chan string, 1)
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			// blocks until delimiter, therefore cannot reach select
+			text, err := reader.ReadString('\n')
+			if err != nil {
+				fmt.Println("err in goroute:", err)
+				close(rCh)
+				return
+			}
+			text = strings.Replace(text, "\n", "", -1)
+			rCh <- text
 		}
+	}()
 
-		stdinCh <- text
+	for {
+		select {
+		case text, ok := <-rCh:
+			if !ok || text == "exit" {
+				close(stdinCh)
+				return
+			}
+			stdinCh <- text
+		case <-sigCh:
+			close(stdinCh)
+		}
 	}
 }
 
